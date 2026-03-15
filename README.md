@@ -41,72 +41,7 @@ The NetShield pipeline collects social-media content from two collection channel
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    subgraph Sources["Data Sources"]
-        TK["TikTok\nKeyword Scraper\n(NDJSON)"]
-        WA["WhatsApp\nGroup Monitor\n(NDJSON)"]
-    end
-
-    subgraph Ingest["Stage 1 · Raw Ingestion  (run_pipeline.py)"]
-        P["load_posts()"]
-        U["load_users()"]
-        C["load_comments()"]
-        K["load_keywords()"]
-        W["load_whatsapp()"]
-    end
-
-    subgraph Raw["raw_data  ·  PostgreSQL"]
-        RP["tiktok_posts_meta"]
-        RU["tiktok_users_meta"]
-        RC["tiktok_comments_meta"]
-        RK["tiktok_script_out"]
-        RW["whatsapp_script_out"]
-    end
-
-    subgraph Transform["Stage 2 · dbt Transformation  (ELT/)"]
-        D1["tiktok_posts.sql"]
-        D2["tiktok_usernames.sql"]
-        D3["tiktok_commnets.sql"]
-        D4["source_log.sql"]
-        D5["hashtags.sql"]
-    end
-
-    subgraph Final["social_data_alfa  ·  PostgreSQL"]
-        FP["posts"]
-        FU["usernames"]
-        FC["comments"]
-        FS["source_log"]
-        FH["hashtags"]
-    end
-
-    subgraph Report["Stage 3–4 · Reporting"]
-        BR["batch_report.py\n(gap analysis)"]
-        SV["serve_report.py\n(Flask + Cloudflare)"]
-        HTML["pipeline_report.html"]
-    end
-
-    TK --> P & U & C & K
-    WA --> W
-    P --> RP
-    U --> RU
-    C --> RC
-    K --> RK
-    W --> RW
-    RP --> D1 & D5
-    RU --> D2
-    RC --> D3
-    RK --> D4
-    RW --> D4
-    D1 --> FP
-    D2 --> FU
-    D3 --> FC
-    D4 --> FS
-    D5 --> FH
-    FP & FU & FC & FS --> BR
-    BR --> HTML
-    HTML --> SV
-```
+![Architecture](images/diagrams/architecture.png)
 
 ---
 
@@ -183,33 +118,7 @@ netshield-pipeline/
 
 The `raw_data` schema is **fully rebuilt on every run** (`DROP TABLE IF EXISTS` + `CREATE TABLE`), guaranteeing a clean slate.
 
-```mermaid
-sequenceDiagram
-    participant M   as run_pipeline.py
-    participant CL  as core_loader.py
-    participant DB  as PostgreSQL
-    participant dbt as dbt
-
-    rect rgb(30, 40, 60)
-        Note over M,DB: Stage 1 — Raw Ingestion (raw_data schema rebuilt from scratch)
-        loop for each of 5 loaders
-            M->>DB: DROP + CREATE table
-            M->>CL: load *.ndjson files
-            CL-->>DB: INSERT batched rows
-        end
-    end
-
-    rect rgb(30, 60, 40)
-        Note over M,dbt: Stage 2 — dbt Transformation
-        M->>dbt: dbt run
-        dbt-->>DB: MERGE into social_data_alfa.*
-    end
-
-    rect rgb(60, 40, 30)
-        Note over M: Stage 3 — Report
-        M->>M: batch_report.generate_report()
-    end
-```
+![Pipeline Sequence](images/diagrams/pipeline_sequence.png)
 
 #### Key mapping logic
 
@@ -227,34 +136,7 @@ sequenceDiagram
 
 dbt reads from `raw_data` and writes to `social_data_alfa` using **incremental merge** strategies. All models use deterministic surrogate keys — no database sequences — so they are safe to full-refresh at any time.
 
-```mermaid
-flowchart LR
-    subgraph raw["raw_data (staging)"]
-        pm[tiktok_posts_meta]
-        um[tiktok_users_meta]
-        cm[tiktok_comments_meta]
-        km[tiktok_script_out]
-        wm[whatsapp_script_out]
-    end
-
-    subgraph models["social_data_alfa (dbt output)"]
-        posts[tiktok_posts]
-        users[tiktok_usernames]
-        comments[tiktok_comments]
-        slog[source_log]
-        htags[hashtags]
-    end
-
-    pm --> posts
-    pm --> htags
-    um --> users
-    cm --> comments
-    posts --> comments
-    users --> comments
-    km --> slog
-    wm --> slog
-    posts --> slog
-```
+![dbt Transformation](images/diagrams/dbt_transform.png)
 
 #### Surrogate key strategy
 
@@ -277,21 +159,7 @@ After every dbt run, `batch_report.py` queries both schemas and computes, for ea
 - **Gap rows** — raw records with no matching final row (LEFT JOIN, capped at 500 per entity)
 - **Gap reason** — categorised explanation for each missing record
 
-```mermaid
-flowchart TD
-    A["batch_report.py starts"] --> B["Connect to PostgreSQL"]
-    B --> C["For each entity:\nPosts / Users / Comments / Keywords / WhatsApp"]
-    C --> D["COUNT raw records\n(deduplicated)"]
-    D --> E["COUNT final rows\nin social_data_alfa"]
-    E --> F["Run gap SQL\nraw LEFT JOIN final\nWHERE final.id IS NULL"]
-    F --> G["Classify each gap row\nby reason"]
-    G --> H["Compute pct_loaded\nfinal ÷ raw × 100"]
-    H --> I{More entities?}
-    I -- yes --> C
-    I -- no --> J["Compute avg load rate\nacross all entities"]
-    J --> K["Render HTML\nwith embedded CSS + JS"]
-    K --> L["Write pipeline_report.html"]
-```
+![Gap Analysis](images/diagrams/gap_analysis.png)
 
 The report is a **fully self-contained HTML file** — all CSS, JavaScript, and CSV data are embedded inline.
 
