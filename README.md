@@ -3,7 +3,6 @@
 > End-to-end data pipeline for ingesting, transforming, and monitoring TikTok and WhatsApp social-media intelligence data.
 
 ## Live Reports → [elt-1cd.pages.dev](https://elt-1cd.pages.dev)
-View all reports in your browser — no login, no cloning needed. Updates automatically on every push.
 
 ---
 
